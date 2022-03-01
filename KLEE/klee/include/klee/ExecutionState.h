@@ -145,6 +145,8 @@ public:
   std::uint64_t steppedInstructions;
 
   Encode encode;
+
+  std::vector<llvm::Instruction*> instructionHistory;
 private:
   ExecutionState() : ptreeNode(0) {}
 

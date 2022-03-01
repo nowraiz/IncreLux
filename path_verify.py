@@ -5,8 +5,10 @@ import psutil
 import subprocess
 import time
 import multiprocessing
+import json as JSON
 import signal
 
+TRAIN_WARNINGS = 100
 # usage
 # python main_remote.py file.json
 
@@ -17,17 +19,18 @@ import signal
 # klee_log_file_name: all log of klee. I do not mv those log into one file.
 
 # those variables need you change
-home_path = "/home/IncreLux"
+home_path = "/home/pseudo/Documents/Research/IncreLux"
 klee_path = home_path+"/KLEE/klee/build/bin/klee"
 
 total_cpu = multiprocessing.cpu_count()
+# total_cpu = 1
 klee_log_file_name = "confirm_result.log"
 klee_result_file_name = "confirm_result.json"
 
 log_file_name = "log.json"
 
 schedule_time = 1  # second
-time_out = 60*10  # second
+time_out = 15  # second
 time_out_file_name = "time_out.json"
 
 # notice: for the reason that python can not kill the klee quickly, it is better to set this small.
@@ -38,21 +41,29 @@ right_return_code = 0
 klee_error_result_file_name = "error.json"
 klee_right_result_file_name = "tested.json"
 # if you need change the path in link file
-linux_kernel_path_in_json = "/home"
-linux_kernel_path_in_this_pc = "/home"
+linux_kernel_path_in_json = "/home/yzhai003/inc-experiment/"
+linux_kernel_path_in_this_pc = "/home/pseudo/Documents/Research/kernel_ir/"
 
 klee_right_result = "KLEE: done: generated tests ="
 
+training_data_dir = home_path + "/training_data"
+
+def execute_shell(cmd):
+    print(cmd)
+    cmd_process = subprocess.Popen(cmd, shell=True)
+    return cmd_process.wait()
 
 class ProcessTimer:
     def __init__(self):
         self.initd = False
         self.execution_state = False
         self.islink = False
+        self.json_idx = -1
 
-    def init(self, path, link_file, json):
+    def init(self, path, link_file, json, idx):
         self.initd = True
         self.path = path
+        self.json_idx = idx
         # link the given bitcode files
         self.link_file = link_file
         self.link_file = self.link_file.replace(linux_kernel_path_in_json, linux_kernel_path_in_this_pc)
@@ -92,7 +103,7 @@ class ProcessTimer:
         self.islink = False
         self.execution_state = True
         # print(self.klee_cmd)
-        self.p = subprocess.Popen(self.klee_cmd, shell=True, preexec_fn=os.setsid)
+        self.p = subprocess.Popen(self.klee_cmd, shell=True, preexec_fn=os.setsid, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # self.p = subprocess.Popen(self.klee_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, preexec_fn=os.setsid)
         os.chdir("../")
 
@@ -192,10 +203,10 @@ class ProcessTimer:
                     if self.p.returncode != right_return_code:
                         self.output_json(klee_error_result_file_name)
 
-            # os.killpg(os.getpgid(self.p.pid), signal.SIGKILL)
-            # os.killpg(os.getpgid(self.p.pid), signal.SIGKILL)
-            # os.killpg(os.getpgid(self.p.pid), signal.SIGTERM)
-            # os.killpg(os.getpgid(self.p.pid), signal.SIGTERM)
+            os.killpg(os.getpgid(self.p.pid), signal.SIGKILL)
+            os.killpg(os.getpgid(self.p.pid), signal.SIGKILL)
+            os.killpg(os.getpgid(self.p.pid), signal.SIGTERM)
+            os.killpg(os.getpgid(self.p.pid), signal.SIGTERM)
 
         except psutil.NoSuchProcess:
             if self.p.returncode != right_return_code:
@@ -208,6 +219,10 @@ class ProcessTimer:
         if not os.path.exists(self.path):
             os.makedirs(self.path)
         os.chdir(self.path)
+        if (self.json_idx != -1):
+            execute_shell(f"cp training.data {training_data_dir}/{self.json_idx}.training.data")
+
+        execute_shell(f"rm training.data")
         rm_cmd = "rm -rf klee-*"
         rm_subprocess = subprocess.Popen(rm_cmd, shell=True)
         rm_subprocess.wait()
@@ -224,7 +239,7 @@ def output_log(s):
     f.write(s)
     f.close()
 
-def run_next_json(index, link_file, json):
+def run_next_json(index, link_file, json, json_index):
     while tasks[index].check_execution_state() or tasks[index].islink:
         tasks[index].poll()
         index = index + 1
@@ -234,7 +249,7 @@ def run_next_json(index, link_file, json):
 
     tasks[index].close()
     path = str(index)
-    tasks[index].init(path, link_file, json)
+    tasks[index].init(path, link_file, json, json_index)
     tasks[index].link()
     return index
 
@@ -271,6 +286,10 @@ def main():
         rm_subprocess = subprocess.Popen(rm_cmd, shell=True)
         rm_subprocess.wait()
 
+    # create the training data folder
+    execute_shell(f"mkdir -p {training_data_dir}")
+
+
     rm_cmd = "rm -rf ./" + klee_result_file_name + " ./" + time_out_file_name + " ./" + klee_right_result_file_name
     rm_cmd = rm_cmd + " ./" + memory_out_file_name + " ./" + klee_error_result_file_name + " ./" + log_file_name
     rm_subprocess = subprocess.Popen(rm_cmd, shell=True)
@@ -282,11 +301,13 @@ def main():
     index = 0
     json_index = 0
     line = file.readline()
-    while line:
+    for _ in range(TRAIN_WARNINGS):
+    # while line:
         json_index = json_index + 1
-        link_file = line
-        json = file.readline()
-        index = run_next_json(index, link_file, json)
+        json = line
+        bc = JSON.loads(json)["bc"]
+        link_file = bc
+        index = run_next_json(index, link_file, json, json_index)
         line = file.readline()
 
     wait_all_json()

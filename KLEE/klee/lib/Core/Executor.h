@@ -28,6 +28,7 @@
 
 #include "../Expr/ArrayExprOptimizer.h"
 #include "../Encode/Symbolic.h"
+#include "Serializer.h"
 
 #include <map>
 #include <memory>
@@ -96,6 +97,9 @@ class Executor : public Interpreter {
 public:
   typedef std::pair<ExecutionState*,ExecutionState*> StatePair;
 
+  Serializer pathSerializer;
+  std::string moduleName;
+
   enum TerminateReason {
     Abort,
     Assert,
@@ -128,7 +132,6 @@ public:
   /// \param purpose An identify string to printed in case of concretization.
   ref<klee::ConstantExpr> toConstant(ExecutionState &state, ref<Expr> e,
                                      const char *purpose);
-
 private:
   static const char *TerminateReasonNames[];
 

@@ -114,6 +114,7 @@ ExecutionState::ExecutionState(const ExecutionState& state):
     arrayNames(state.arrayNames),
     openMergeStack(state.openMergeStack),
     steppedInstructions(state.steppedInstructions),
+    instructionHistory(state.instructionHistory),
     encode(state.encode) {
   for (auto cur_mergehandler: openMergeStack)
     cur_mergehandler->addOpenState(this);
