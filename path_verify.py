@@ -8,7 +8,7 @@ import multiprocessing
 import json as JSON
 import signal
 
-TRAIN_WARNINGS = 100
+TRAIN_WARNINGS = 500
 # usage
 # python main_remote.py file.json
 
@@ -19,18 +19,17 @@ TRAIN_WARNINGS = 100
 # klee_log_file_name: all log of klee. I do not mv those log into one file.
 
 # those variables need you change
-home_path = "/home/pseudo/Documents/Research/IncreLux"
+home_path = "/extra/ali/IncreLux"
 klee_path = home_path+"/KLEE/klee/build/bin/klee"
 
 total_cpu = multiprocessing.cpu_count()
-# total_cpu = 1
 klee_log_file_name = "confirm_result.log"
 klee_result_file_name = "confirm_result.json"
 
 log_file_name = "log.json"
 
 schedule_time = 1  # second
-time_out = 15  # second
+time_out = 15 # second
 time_out_file_name = "time_out.json"
 
 # notice: for the reason that python can not kill the klee quickly, it is better to set this small.
@@ -41,8 +40,8 @@ right_return_code = 0
 klee_error_result_file_name = "error.json"
 klee_right_result_file_name = "tested.json"
 # if you need change the path in link file
-linux_kernel_path_in_json = "/home/yzhai003/inc-experiment/"
-linux_kernel_path_in_this_pc = "/home/pseudo/Documents/Research/kernel_ir/"
+linux_kernel_path_in_json = "/data2/yizhuo/inc-experiment/experiment"
+linux_kernel_path_in_this_pc = "/extra/ali/kernel_ir/"
 
 klee_right_result = "KLEE: done: generated tests ="
 
@@ -77,7 +76,8 @@ class ProcessTimer:
         self.json = json
         self.json = self.json.replace("\n", "")
         # klee_cmd = klee_path + " -json=\'" + self.json + "\' " + "./built-in.bc 2>&1 | tee >> " + klee_log_file_name
-        klee_cmd = klee_path + " -json=\'" + self.json + "\' " + "./built-in.bc"
+        # klee_cmd = klee_path + " -json=\'" + self.json + "\' " + " -fjson=\'" + "cg-414.json" + "\' "  + "./built-in.bc"
+        klee_cmd = f"{klee_path} -json='{self.json}' -fjson='cg-414.json' --train-file-name='{training_data_dir}/{self.json_idx}.training.data' ./built-in.bc"
         self.klee_cmd = klee_cmd
         self.execution_state = False
 
@@ -104,6 +104,7 @@ class ProcessTimer:
         self.execution_state = True
         # print(self.klee_cmd)
         self.p = subprocess.Popen(self.klee_cmd, shell=True, preexec_fn=os.setsid, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # self.p = subprocess.Popen(self.klee_cmd, shell=True, preexec_fn=os.setsid)
         # self.p = subprocess.Popen(self.klee_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, preexec_fn=os.setsid)
         os.chdir("../")
 
@@ -219,10 +220,11 @@ class ProcessTimer:
         if not os.path.exists(self.path):
             os.makedirs(self.path)
         os.chdir(self.path)
-        if (self.json_idx != -1):
-            execute_shell(f"cp training.data {training_data_dir}/{self.json_idx}.training.data")
+        # if (self.json_idx != -1):
+        #     execute_shell(f"cp training.data {training_data_dir}/{self.json_idx}.training.data")
+        print(f"Done {self.json_idx}")
 
-        execute_shell(f"rm training.data")
+        # execute_shell(f"rm training.data")
         rm_cmd = "rm -rf klee-*"
         rm_subprocess = subprocess.Popen(rm_cmd, shell=True)
         rm_subprocess.wait()
@@ -301,13 +303,19 @@ def main():
     index = 0
     json_index = 0
     line = file.readline()
-    for _ in range(TRAIN_WARNINGS):
+    # for _ in range(TRAIN_WARNINGS):
+    counter = {}
+    warn_count = 0
     # while line:
+    while warn_count < 400:
         json_index = json_index + 1
-        json = line
-        bc = JSON.loads(json)["bc"]
-        link_file = bc
-        index = run_next_json(index, link_file, json, json_index)
+        link_file = line
+        json = file.readline()
+        filename = JSON.loads(json)["bc"]
+        counter[filename] = counter.get(filename, 0) + 1
+        if counter[filename] <= 1: 
+            warn_count += 1
+            index = run_next_json(index, link_file, json, json_index)
         line = file.readline()
 
     wait_all_json()
@@ -317,10 +325,19 @@ def main():
     # read_all_json(memory_out_file_name)
     # read_all_json(klee_error_result_file_name)
 
+    for i in range(total_cpu):
+        rm_cmd = "rm -rf ./" + str(i)
+        rm_subprocess = subprocess.Popen(rm_cmd, shell=True)
+        rm_subprocess.wait()
 
 if __name__ == "__main__":
     if len(sys.argv)>2:
         time_out = int(sys.argv[2])
     if len(sys.argv) > 3:
         memory_out = int(sys.argv[3])*1024*1024*1024
-    main()
+    try:
+        main()
+    except KeyboardInterrupt as e:
+        for i in range(total_cpu):
+            tasks[i].close()
+        raise e

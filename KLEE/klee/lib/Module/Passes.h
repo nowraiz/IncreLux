@@ -204,6 +204,7 @@ public:
   OptNonePass() : llvm::ModulePass(ID) {}
   bool runOnModule(llvm::Module &M) override;
 };
+
 } // namespace klee
 
 #endif /* KLEE_PASSES_H */

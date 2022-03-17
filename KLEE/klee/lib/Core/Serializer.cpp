@@ -6,13 +6,18 @@
 #include "llvm/IR/Function.h"
 #include <iostream>
 
+#define MAX_TUPLE 640
 bool Serializer::isValidInstruction(llvm::Instruction *ins) {
-    return ins->getParent()->getName().str() != "";
+    // assuming for now an instruction is valid if it contains a canonical name metadata node
+    if (ins->getMetadata("canonical.name") != NULL)
+        return true;
+    return false;
 }
 
 void Serializer::addTrainingTuple(const std::vector<llvm::Instruction *> instructions,
                                   bool feasible, bool valid) {
     if (!valid) return;
+    tuple_count++;
 //    trainingData.push_back(PathTuple(instructions, feasible));
     // instant dump
     output << feasible << "\n";
@@ -23,9 +28,18 @@ void Serializer::dumpInstructions(const std::vector<llvm::Instruction*> path,
                                   std::ofstream &output) {
     output << path.size() << "\n";
     for (llvm::Instruction *i : path) {
-        output << getCanonicalName(i) << ";;";
+        output << extractCanonicalName(i) << ";;";
     }
     output << "\n";
+}
+
+std::string Serializer::extractCanonicalName(const llvm::Instruction* instruction) {
+    /*
+     * Returns the canonical name present in the metadata of the given instruction (also used as
+     * the instruction id)
+     */
+    llvm::MDNode* N = instruction->getMetadata("canonical.name");
+    return dyn_cast<llvm::MDString>(N->getOperand(0))->getString().str();
 }
 
 std::string Serializer::getCanonicalName(const llvm::Instruction *instruction) {

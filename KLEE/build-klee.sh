@@ -19,7 +19,7 @@ export Z3_INCLUDE_DIRS=${CUR_DIR}/z3/build/include
 #if [ ! -d "build" ]; then
 #	mkdir build
 #fi
-#mkdir build
+mkdir -p klee/build
 cd klee/build
 cmake -DENABLE_UNIT_TESTS=OFF -DENABLE_SYSTEM_TESTS=OFF -DLLVM_CONFIG_BINARY=../../../llvm/build/bin/llvm-config -DLLVMCC=../../../llvm/build/bin/clang -DLLVMCXX=../../../llvm/build/bin/clang++ -DENABLE_SOLVER_Z3=ON -DZ3_INCLUDE_DIRS=${CUR_DIR}/z3/prefix/include -DZ3_LIBRARIES=${CUR_DIR}/z3/prefix/lib/libz3.so ..
-make -j12
+make -j96

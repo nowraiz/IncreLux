@@ -25,12 +25,21 @@ struct PathTuple {
 
 class Serializer {
 
+  size_t tuple_count;
   std::vector<PathTuple> trainingData;
   std::ofstream output;
+  std::string filename;
 
 public:
   Serializer() {
+      tuple_count = 0;
       output.open("training.data");
+  }
+  
+  Serializer(const std::string& filename) {
+    tuple_count = 0;
+    this->filename = filename;
+    output.open(filename.c_str());
   }
 
   // check if the instruction is part of the given bitcode (HACK)
@@ -49,6 +58,9 @@ public:
 
   // get the canonical name for the instruction
   std::string getCanonicalName(const llvm::Instruction *instruction);
+
+  // extract the canonical name for the instruction from the IR Metadata
+  std::string extractCanonicalName(const llvm::Instruction* instruction);
 
   ~Serializer() {
       output.close();

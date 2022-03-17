@@ -86,6 +86,15 @@ using namespace llvm;
 using namespace klee;
 
 namespace klee {
+
+cl::OptionCategory TrainCat("Training Data Options", "These options control the path feasibility data generation");
+
+cl::opt<std::string>
+TrainingFileName("train-file-name", cl::desc("the file name to dump training data in"), cl::init("training.data"),
+            cl::cat(TrainCat));
+}
+
+namespace klee {
 cl::OptionCategory DebugCat("Debugging options",
                             "These are debugging options.");
 
@@ -440,7 +449,7 @@ Executor::Executor(LLVMContext &ctx, const InterpreterOptions &opts,
       pathWriter(0), symPathWriter(0), specialFunctionHandler(0), timers{time::Span(TimerInterval)},
       replayKTest(0), replayPath(0), usingSeeds(0),
       atMemoryLimit(false), inhibitForking(false), haltExecution(false),
-      ivcEnabled(false), debugLogBuffer(debugBufferString), symbolic(this), argNum(0) {
+      ivcEnabled(false), debugLogBuffer(debugBufferString), symbolic(this), argNum(0), pathSerializer(TrainingFileName) {
 
 
   const time::Span maxTime{MaxTime};
@@ -1640,7 +1649,6 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
     state.encode.checkUseList(i->getParent()->getName());
 
     if (state.encode.ckeck) {
-	errs()<<"encode.ckeck:"<<"\n";
         this->symbolic.isWarning(state, ki);
         if (state.encode.warningL) {
             //Check if there is a solution fulfills the constraints
