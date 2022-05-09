@@ -92,7 +92,10 @@ cl::OptionCategory TrainCat("Training Data Options", "These options control the 
 cl::opt<std::string>
 TrainingFileName("train-file-name", cl::desc("the file name to dump training data in"), cl::init("training.data"),
             cl::cat(TrainCat));
+cl::opt<bool>
+DumpPaths("dump-paths", cl::desc("Dump path feasibility data"), cl::init(false), cl::cat(TrainCat));
 }
+
 
 namespace klee {
 cl::OptionCategory DebugCat("Debugging options",
@@ -449,7 +452,7 @@ Executor::Executor(LLVMContext &ctx, const InterpreterOptions &opts,
       pathWriter(0), symPathWriter(0), specialFunctionHandler(0), timers{time::Span(TimerInterval)},
       replayKTest(0), replayPath(0), usingSeeds(0),
       atMemoryLimit(false), inhibitForking(false), haltExecution(false),
-      ivcEnabled(false), debugLogBuffer(debugBufferString), symbolic(this), argNum(0), pathSerializer(TrainingFileName) {
+      ivcEnabled(false), debugLogBuffer(debugBufferString), symbolic(this), argNum(0), pathSerializer(TrainingFileName, DumpPaths) {
 
 
   const time::Span maxTime{MaxTime};
@@ -1628,6 +1631,26 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
 
   bool valid = false;
   if (pathSerializer.isValidInstruction(i)) {
+      if (singleton) {
+        std::string insName = pathSerializer.extractCanonicalName(i);
+        if (singletonPath.size() > 0) {
+          // only one path can be explored
+          std::string top = singletonPath.front(); 
+          if (top == insName) {
+            singletonPath.pop();
+          } else {
+            // errs() << "top: " << top << " , " << "ins: " << insName << "\n";
+            // this state is going somewhere else terminate
+            errs() << "terminating state" << "\n";
+            terminateState(state);
+            return;
+          }
+        } else {
+          errs() << "Terminating extra state" << "\n";
+          terminateState(state);
+          return;
+        }
+      } 
       valid = true;
       state.instructionHistory.push_back(i);
   }
@@ -1652,6 +1675,7 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
         this->symbolic.isWarning(state, ki);
         if (state.encode.warningL) {
             //Check if there is a solution fulfills the constraints
+            errs() << "Found sink: " << "\n";
             state.encode.checkConditions();
         }
     }
@@ -1666,11 +1690,11 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
         state.encode.output();
 	errs()<<"Yes.\n";
         pathSerializer.dumpTrainingData("training.data");
-        exit(0);
+        exit(69);
         // find
     } else if (result == -2) {
 	errs()<<"Yes.\n";
-        state.encode.output();
+        // state.encode.output();
         // alt
     }
 

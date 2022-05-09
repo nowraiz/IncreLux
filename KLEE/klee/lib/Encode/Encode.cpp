@@ -381,13 +381,13 @@ namespace klee {
         }
 #endif
 
-        if (flag == -2) {
-            json["priority"] = "symbolic condition loop";
-            std::ofstream out_file("confirm_result.json",
-                                   std::ios_base::out | std::ios_base::app);
-            out_file << json.dump() << "\n";
-            out_file.close();
-        }
+        // if (flag == -2) {
+        //     json["priority"] = "symbolic condition loop";
+        //     std::ofstream out_file("confirm_result.json",
+        //                            std::ios_base::out | std::ios_base::app);
+        //     out_file << json.dump() << "\n";
+        //     out_file.close();
+        // }
     }
 
     std::string Encode::getName(ref<klee::Expr> value) {

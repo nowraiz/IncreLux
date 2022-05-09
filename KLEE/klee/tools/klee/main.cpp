@@ -62,6 +62,7 @@
 #include <iomanip>
 #include <iterator>
 #include <sstream>
+#include <queue>
 
 
 using namespace llvm;
@@ -76,6 +77,14 @@ namespace {
     cl::opt<std::string>
             FJson("fjson",
                   cl::desc("the warning json object"),
+                  cl::init(""));
+  
+  cl::opt<bool> Singleton("single-path",
+                  cl::desc("only explore single given path"),
+                  cl::init(false));
+
+  cl::opt<std::string>
+            SingletonPath("single-path-file", cl::desc("file containing the single path to explore"),
                   cl::init(""));
 
   cl::opt<std::string>
@@ -1373,6 +1382,21 @@ std::cerr<<"replayPath.\n";
     theInterpreter = Interpreter::create(ctx, IOpts, handler);
   interpreter->json = Json;
   interpreter->fjson = FJson;
+  interpreter->singleton = Singleton;
+  if (Singleton) {
+    std::queue<std::string> path;
+    std::ifstream input;
+    input.open(SingletonPath.c_str());
+    while (input.good()) {
+      std::string line;
+      input >> line;
+      path.push(line);
+    }
+    input.close();
+    interpreter->singletonPath = path;
+    errs() << "Singleton path" << "\n";
+
+  }
   assert(interpreter);
   handler->setInterpreter(interpreter);
 

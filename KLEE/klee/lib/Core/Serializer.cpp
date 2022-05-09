@@ -17,6 +17,7 @@ bool Serializer::isValidInstruction(llvm::Instruction *ins) {
 void Serializer::addTrainingTuple(const std::vector<llvm::Instruction *> instructions,
                                   bool feasible, bool valid) {
     if (!valid) return;
+    if (!dumpPaths) return;
     tuple_count++;
 //    trainingData.push_back(PathTuple(instructions, feasible));
     // instant dump
@@ -35,14 +36,16 @@ void Serializer::dumpInstructions(const std::vector<llvm::Instruction*> path,
 
 std::string Serializer::extractCanonicalName(const llvm::Instruction* instruction) {
     /*
-     * Returns the canonical name present in the metadata of the given instruction (also used as
+     * Returns the canonical name using the index present in the metadata of the given instruction (also used as
      * the instruction id)
      */
+
     llvm::MDNode* N = instruction->getMetadata("canonical.name");
-    return dyn_cast<llvm::MDString>(N->getOperand(0))->getString().str();
+    std::string idx = dyn_cast<llvm::MDString>(N->getOperand(0))->getString().str();
+    return getCanonicalName(instruction, idx);
 }
 
-std::string Serializer::getCanonicalName(const llvm::Instruction *instruction) {
+std::string Serializer::getCanonicalName(const llvm::Instruction *instruction, std::string idx) {
     /*
      * Returns the canonical name for the given instruction to uniquely identify
      * it outside of the llvm ecosystem. This could be done better by doing it
@@ -50,22 +53,9 @@ std::string Serializer::getCanonicalName(const llvm::Instruction *instruction) {
      * instruction
      */
     const llvm::BasicBlock *basicBlock = instruction->getParent();
-    const llvm::Function *function = basicBlock->getParent();
-    std::string funcName = function->getName().str();
-    int insIdx = -1;
-    int i = 0;
-
-    // find the index of instruction within basic block
-    for (auto it = basicBlock->begin(); it != basicBlock->end(); it++, i++) {
-        const llvm::Instruction *ins = &*it;
-        if (ins == instruction) {
-            insIdx = i;
-            break;
-        }
-    }
 
     std::stringstream canonicalName;
-    canonicalName << funcName << basicBlock->getName().str() << "-" << insIdx;
+    canonicalName << basicBlock->getName().str() << "-" << idx;
     return canonicalName.str();
 }
 

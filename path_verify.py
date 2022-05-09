@@ -8,7 +8,7 @@ import multiprocessing
 import json as JSON
 import signal
 
-TRAIN_WARNINGS = 500
+TRAIN_WARNINGS = 10
 # usage
 # python main_remote.py file.json
 
@@ -28,8 +28,8 @@ klee_result_file_name = "confirm_result.json"
 
 log_file_name = "log.json"
 
-schedule_time = 1  # second
-time_out = 15 # second
+schedule_time = 15  # second
+time_out = 120*3 # second
 time_out_file_name = "time_out.json"
 
 # notice: for the reason that python can not kill the klee quickly, it is better to set this small.
@@ -297,6 +297,7 @@ def main():
     rm_subprocess = subprocess.Popen(rm_cmd, shell=True)
     rm_subprocess.wait()
 
+    total = time.perf_counter()
     filename = sys.argv[1]
     file = open(filename)
 
@@ -307,19 +308,20 @@ def main():
     counter = {}
     warn_count = 0
     # while line:
-    while warn_count < 400:
+    while warn_count < 300:
         json_index = json_index + 1
         link_file = line
         json = file.readline()
-        filename = JSON.loads(json)["bc"]
-        counter[filename] = counter.get(filename, 0) + 1
-        if counter[filename] <= 1: 
-            warn_count += 1
-            index = run_next_json(index, link_file, json, json_index)
+        # filename = JSON.loads(json)["bc"]
+        # counter[filename] = counter.get(filename, 0) + 1
+        # if counter[filename] <= 1: 
+        warn_count += 1
+        index = run_next_json(index, link_file, json, json_index)
         line = file.readline()
 
     wait_all_json()
 
+    print(f"Took a total of {time.perf_counter() - total} seconds")
     read_all_json(klee_result_file_name)
     # read_all_json(time_out_file_name)
     # read_all_json(memory_out_file_name)

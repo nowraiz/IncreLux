@@ -14,6 +14,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <queue>
 
 struct KTest;
 
@@ -52,6 +53,8 @@ public:
   std::string json;
   std::string fjson;
   std::string moduleName;
+  bool singleton;
+  std::queue<std::string> singletonPath;
   /// ModuleOptions - Module level options which can be set when
   /// registering a module with the interpreter.
   struct ModuleOptions {
