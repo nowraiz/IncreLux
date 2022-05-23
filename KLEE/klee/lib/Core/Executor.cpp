@@ -2144,8 +2144,14 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
 #endif
                                 for (auto fff : *item.second) {
 #if DEBUGINFO
+                      
+                                    
                                     std::cerr << "fff : " << fff << "\n";
 #endif
+                                    auto idx = fff.find("$$");
+                                    if (idx != std::string::npos) {
+                                      fff = fff.substr(0, idx);
+                                    } 
                                     f = this->kmodule->module->getFunction(fff);
 
                                     if (f != nullptr) {

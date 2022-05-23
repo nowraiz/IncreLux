@@ -6,8 +6,9 @@ import subprocess
 import time
 import shutil
 import signal
+import json as JSON
+import numpy as np
 import psutil
-from regex import P
 import torch.multiprocessing as multiprocessing
 from functools import lru_cache
 sys.path.insert(0, '/extra/ali/agents/')
@@ -99,11 +100,33 @@ class WarningVerifyProcess(multiprocessing.Process):
         self.json_idx = json_idx
         self.success = multiprocessing.Value('i', False) 
         self.path_found = multiprocessing.Value('i', False)
+        self.rank = multiprocessing.Value('i', 0)
+        self.p = multiprocessing.Value('i', 0)
 
     # @classmethod
     def run(self):
         # global found
-        self.success.value, self.path_found.value = verify_warning(self.gnn, self.json, self.graph, self.link_file, self.index, self.json_idx)
+        # self.success.value, self.path_found.value, self.rank.value, self.p.value = \
+            # verify_warning(self.gnn, self.json, self.graph, self.link_file, self.index, self.json_idx)
+        self.success.value, self.path_found.value, self.rank.value, self.p.value = \
+            verify_baseline_warning(None, self.json, None, self.link_file, self.index, None)
+
+def verify_baseline_warning(gnn=None, json=None, graph=None, link_file=None, index=None, json_idx=None):
+    if index is not None:
+        os.chdir(str(index))
+
+    (error, stdout, stderr), bc_list = link_files(link_file)
+    if (error != 0):
+        print("error in linking")
+        return False, False, 0, 0
+
+    r, _, _ = verify_baseline(json)
+    if r == 69:
+        shutil.rmtree("klee-out")
+        return True, True, 0, 0
+    shutil.rmtree("klee-out")
+    os.remove("./built-in.bc")
+    return True, False, 0, 0
 
 def verify_warning(gnn=None, json=None, graph=None, link_file=None, index=None, json_idx=None):
         if index is not None:
@@ -139,12 +162,19 @@ def verify_warning(gnn=None, json=None, graph=None, link_file=None, index=None, 
         items = rank_paths(gnn, paths, graph)
         
         found = False
+        feasible = False
+        top_rank = 0
         for i in range(min(len(items), K)):
             item = items[i]
             path, rank = item
             # print(rank)
             r, _, _ = verify_single_path(json, path)
             if (r == 69):
+                if not found:
+                    top_rank = i + 1
+                    feasible = rank >= 0.5
+                    
+
                 found = True
                 # found += 1
                 # print(f"Found: {found}")
@@ -153,7 +183,7 @@ def verify_warning(gnn=None, json=None, graph=None, link_file=None, index=None, 
             shutil.rmtree("klee-out")
 
         os.remove("./built-in.bc")
-        return True, found
+        return True, found, top_rank, feasible
 
 class GraphGeneratorProcess(multiprocessing.Process):
     def __init__(self, link_file, index):
@@ -178,6 +208,7 @@ def execute_shell(cmd, debug=True):
         return (cmd_process.returncode, stdout, stderr)
     else:
         cmd_process = subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # cmd_process = subprocess.Popen(cmd, shell=True)
         os.sched_setaffinity(cmd_process.pid, affinity)
         # cmd_process = subprocess.Popen(cmd, shell=True)
         return (cmd_process.wait(), None, None)
@@ -243,7 +274,7 @@ def verify_singleton_path(json, path_file):
 
 
 def verify_baseline(json):
-    cmd = f"{klee_path} -json='{json}' -fjson='../cg-414.json' -output-dir=klee-out --max-time=15 ./built-in.bc"
+    cmd = f"{klee_path} -json='{json}' -fjson='../cg-414.json' -output-dir=klee-out --max-time=10min ./built-in.bc"
     return execute_shell(cmd, debug=False)
 
 def verify_single_path(json, path):
@@ -258,116 +289,154 @@ start_times = [None for _ in range(total_cpu)]
 processes = [None for _ in range(total_cpu)]
 
 def main():
-    # # os.chdir("temp")
-    # for i in range(total_cpu):
-    #     execute_shell(f"rm -rf {i}")
+    # os.chdir("temp")
+    for i in range(total_cpu):
+        execute_shell(f"rm -rf {i}")
     # for i in range(total_cpu):
     #     execute_shell(f"mkdir -p {i}")
 
 
-    # gnn = GNN([32, 16 , 32])
-    # sd = torch.load("/extra/ali/agents/saved_models/state.dict")
-    # gnn.load_state_dict(sd)
-    # gnn.eval()
+    gnn = GNN([32, 16 , 32])
+    sd = torch.load("/extra/ali/agents/saved_models/state.dict")
+    gnn.load_state_dict(sd)
+    gnn.eval()
 
-    # filename = sys.argv[1]
-    # file = open(filename)
+    ids = set()
+    with open("ids.json") as f:
+        line = f.readline()
+        while line:
+            json = JSON.loads(line)
+            warn_id = json["id"]
+            ids.add(warn_id)
+            line = f.readline()
+         
+    top_ranks = []
+    print(len(ids))
 
-    # json_index = 0
-    # line = file.readline()
-    # SKIP_WARNINGS = 0
-    # idx = 0
-    # t = time.perf_counter()
-    # i = 0 
+
+
+    filename = sys.argv[1]
+    file = open(filename)
+
+    json_index = 0
+    line = file.readline()
+    SKIP_WARNINGS = 0
+    idx = 0
+    t = time.perf_counter()
+    i = 0 
+    infeasible = 0
   
-    # skipped = 0
-    # completed = 0
-    # paths_found = 0
-    # failed = 0
-    # timed_out_warnings = 0
-    # while line:
-    #     i += 1
-    #     json_index = json_index + 1
-    #     link_file = line
-    #     json = file.readline()
-    #     json = json.replace("\n", "")
-    #     line = file.readline()
-    #     x = link_file.strip().split(":")
-    #     if (len(x) > 1000):
-    #         # do something
-    #         skipped += 1
-    #         continue
-    #     # if (len(x) > 1900):
-    #     #     print(len(x))
-    #     #     link_files(link_file)
-    #     #     print("Linked", flush=True)
-    #     #     enumerate_paths(json)
-    #         # verify_baseline(json)
-    #     # parsed = JSON.loads(json)
+    skipped = 0
+    completed = 0
+    paths_found = 0
+    failed = 0
+    timed_out_warnings = 0
+    while line:
+        i += 1
+        json_index = json_index + 1
+        link_file = line
+        json = file.readline()
+        json = json.replace("\n", "")
+        line = file.readline()
+        parsed = JSON.loads(json)
+        if (parsed["id"] not in ids):
+            skipped += 1
+            continue 
+
+        bc_list = link_file.split(":")
+        bc_set = set(bc_list)
+
+        if len(bc_list) != len(bc_set):
+            print(f"List len: {len(bc_list)}, Set Len: {len(bc_set)}")
+
+        continue
+        # if (len(x) > 1900):
+        #     print(len(x))
+        #     link_files(link_file)
+        #     print("Linked", flush=True)
+        #     enumerate_paths(json)
+            # verify_baseline(json)
+        # parsed = JSON.loads(json)
         
-    #     # if (skipped < SKIP_WARNINGS):
-    #     #     skipped += 1
-    #     #     continue
-    #     # # g = create_data_graph(link_file)
-    #     # if link_file in done:
-    #     #     continue
+        # if (skipped < SKIP_WARNINGS):
+        #     skipped += 1
+        #     continue
+        # # g = create_data_graph(link_file)
+        # if link_file in done:
+        #     continue
         
-    #     timed_out = False
-    #     while processes[idx] and processes[idx].is_alive():
-    #         if start_times[idx] and time.perf_counter() - start_times[idx] > TIMEOUT:
-    #             timed_out = True
-    #             break 
-    #         idx = (idx + 1) % total_cpu
+        timed_out = False
+        while processes[idx] and processes[idx].is_alive():
+            if start_times[idx] and time.perf_counter() - start_times[idx] > TIMEOUT:
+                timed_out = True
+                break 
+            idx = (idx + 1) % total_cpu
         
-    #     # output, stdout, stderr = link_files(link_file)
-    #     # if (output != 0):
-    #         # print(link_file)
-    #         # print(stdout)
-    #         # print(stderr)
+        # output, stdout, stderr = link_files(link_file)
+        # if (output != 0):
+            # print(link_file)
+            # print(stdout)
+            # print(stderr)
 
-    #     if timed_out:
-    #         if processes[idx].is_alive():
-    #             kill_proc_tree(processes[idx].pid, include_parent=False)
-    #             processes[idx].kill()
-    #         while processes[idx].is_alive():
-    #             processes[idx].kill()
-    #         processes[idx].close()
-    #         timed_out_warnings += 1
-    #     # p.apply_async(WarningVerifyProcess.run, (gnn, json, link_file, idx))
-    #     # # processes[idx].terminate()
-    #     if processes[idx] and not timed_out:
-    #         processes[idx].join()
-    #         processes[idx].close()
-    #         success, path_found = processes[idx].success.value, processes[idx].path_found.value
-    #         if (success):
-    #             completed += 1
-    #         else:
-    #             failed += 1
-    #         if path_found:
-    #             paths_found += 1
-    #     # WarningVerifyProcess.run(gnn, json, g, link_file)
-    #     print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Total: {i}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
-    #     processes[idx] = WarningVerifyProcess(gnn, json, None, link_file, idx, json_index)
-    #     # processes[idx] = GraphGeneratorProcess(link_file, index)
-    #     processes[idx].start()
-    #     os.sched_setaffinity(processes[idx].pid, affinity)
-    #     start_times[idx] = time.perf_counter()
+        if timed_out:
+            if processes[idx].is_alive():
+                kill_proc_tree(processes[idx].pid, include_parent=False)
+                processes[idx].kill()
+            while processes[idx].is_alive():
+                processes[idx].kill()
+            processes[idx].close()
+            timed_out_warnings += 1
+        # p.apply_async(WarningVerifyProcess.run, (gnn, json, link_file, idx))
+        # # processes[idx].terminate()
+        if processes[idx] and not timed_out:
+            processes[idx].join()
+            processes[idx].close()
+            success, path_found, rank, feasible = processes[idx].success.value, processes[idx].path_found.value, processes[idx].rank.value, processes[idx].p.value
+            if (success):
+                completed += 1
+            else:
+                failed += 1
+            if path_found:
+                paths_found += 1
+            top_ranks.append(rank)
+            if not feasible:
+                infeasible += 1
+            processes[idx] = None
+        # WarningVerifyProcess.run(gnn, json, g, link_file)
+        print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Total: {i}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
+        processes[idx] = WarningVerifyProcess(gnn, json, None, link_file, idx, json_index)
+        # processes[idx] = GraphGeneratorProcess(link_file, index)
+        processes[idx].start()
+        os.sched_setaffinity(processes[idx].pid, affinity)
+        start_times[idx] = time.perf_counter()
 
+    exit()
 
-    # for p in processes:
-    #     if p:
-    #         p.join()
-    #         p.close()
+    for p in processes:
+        if p:
+            p.join()
+            p.close()
+            success, path_found, rank, feasible = p.success.value, p.path_found.value, p.rank.value, p.p.value
+            if (success):
+                completed += 1
+            else:
+                failed += 1
+            if path_found:
+                paths_found += 1
+            top_ranks.append(rank)
+            if not feasible:
+                infeasible += 1
 
-    # print(f"Elapsed time: {time.perf_counter()-t} seconds")
-    # print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Total: {i}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
-    # read_all_json("confirm_result.json")
+    print(f"Elapsed time: {time.perf_counter()-t} seconds")
+    print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Total: {i}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
+    print(f"Avg rank: {sum(top_ranks)/len(top_ranks)}, 90th percentile rank: {np.percentile(top_ranks, 90)}, Infeasible: {infeasible}, Accuracy: {(completed-infeasible)*100}")
+    
+    read_all_json("confirm_result.json")
 
-    # for i in range(total_cpu):
-    #     shutil.rmtree(str(i))
-    # for i in range(total_cpu):
-        # execute_shell(f"rm -rf {i}")
-
+    for i in range(total_cpu):
+        shutil.rmtree(str(i))
+    for i in range(total_cpu):
+        execute_shell(f"rm -rf {i}")
 
 
 if __name__ == "__main__":
