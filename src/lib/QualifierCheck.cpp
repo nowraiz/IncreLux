@@ -19,6 +19,7 @@
 #include <deque>
 #include <utility>
 
+
 #define DEBUG_TITLE
 #define WRITEJSON
 #define W_TIMING
@@ -526,10 +527,31 @@ void FuncAnalysis::QualifierCheck()
         }
     }
 }
+
+std::set<std::string> FuncAnalysis::findRelatedBC(llvm::Function* function) {
+
+    std::set<std::string> modules;
+    if (Ctx->funcToMd.find(function) != Ctx->funcToMd.end()) {
+        modules.insert(Ctx->funcToMd[function].str());
+    }
+    for (std::set<llvm::Function*>::iterator it = Ctx->CallMaps[function].begin(); it != Ctx->CallMaps[function].end(); it++) {
+        llvm::Function* calledFunction = *it;
+        if (Ctx->funcToMd.find(calledFunction) != Ctx->funcToMd.end()) {
+            StringRef md = Ctx->funcToMd[calledFunction];
+            modules.insert(md.str());
+        }
+    }
+
+    return modules;
+}
+
+
 //nodeIndex: printRelatedBB for nodeIndex, check the define before Instruction I
 void FuncAnalysis::printRelatedBB(NodeIndex nodeIndex, const llvm::Value *Val,
                                   std::set<const Instruction *> &v, std::string rank, int argNo, int field, llvm::Function *Callee)
 {
+    
+ 
     OP<<"Inside printRelatedBB:\n";
     const llvm::Instruction *I = dyn_cast<const llvm::Instruction>(Val);
 
@@ -706,10 +728,16 @@ void FuncAnalysis::printRelatedBB(NodeIndex nodeIndex, const llvm::Value *Val,
         //{"variable", varName}
     };
     std::string json_str = jsonObj.dump();
-    for (auto item : fSummary.relatedBC)
-    {
+    const llvm::Function* func = I->getFunction();
+    llvm::Function* ptr = const_cast<llvm::Function*>(func);
+    std::set<std::string> relatedBitcode = findRelatedBC(ptr);
+    for (auto item: relatedBitcode) {
         OP << item << ":";
     }
+    // for (auto item : fSummary.relatedBC)
+    // {
+        // OP << item << ":";
+    // }
     OP << "\n";
     OP << "json obj:" << json_str << "\n";
 

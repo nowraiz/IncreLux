@@ -193,6 +193,9 @@ protected:
         }
     }
 
+    // find the related bitcodes
+    std::set<std::string> findRelatedBC(llvm::Function*);
+
     //Used for detecting Integer overflow and OOB
 private:
     NodeToQualifier ionQualiArray;

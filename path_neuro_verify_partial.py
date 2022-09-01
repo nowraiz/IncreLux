@@ -9,6 +9,7 @@ import signal
 import json as JSON
 import numpy as np
 import psutil
+import pickle
 import torch.multiprocessing as multiprocessing
 from functools import lru_cache
 sys.path.insert(0, '/extra/ali/agents/')
@@ -102,14 +103,17 @@ class WarningVerifyProcess(multiprocessing.Process):
         self.path_found = multiprocessing.Value('i', False)
         self.rank = multiprocessing.Value('i', 0)
         self.p = multiprocessing.Value('i', 0)
+        self.min_path = multiprocessing.Value('i', 0)
+        self.avg_paths = multiprocessing.Value('d', 0)
+        self.num_paths = multiprocessing.Value('i', 0)
 
     # @classmethod
     def run(self):
         # global found
         # self.success.value, self.path_found.value, self.rank.value, self.p.value = \
             # verify_warning(self.gnn, self.json, self.graph, self.link_file, self.index, self.json_idx)
-        self.success.value, self.path_found.value, self.rank.value, self.p.value = \
-            verify_baseline_warning(None, self.json, None, self.link_file, self.index, None)
+        self.success.value, self.path_found.value, self.rank.value, self.p.value, self.min_path.value, self.avg_paths.value, self.num_paths.value = \
+            verify_warning(self.gnn, self.json, None, self.link_file, self.index, None)
 
 def verify_baseline_warning(gnn=None, json=None, graph=None, link_file=None, index=None, json_idx=None):
     if index is not None:
@@ -164,6 +168,10 @@ def verify_warning(gnn=None, json=None, graph=None, link_file=None, index=None, 
         found = False
         feasible = False
         top_rank = 0
+        num_paths = 0
+        min_path = len(min(paths, key=len))
+        num_paths = len(paths)
+        avg_paths = sum(list(map(len, paths)))/num_paths
         for i in range(min(len(items), K)):
             item = items[i]
             path, rank = item
@@ -183,7 +191,7 @@ def verify_warning(gnn=None, json=None, graph=None, link_file=None, index=None, 
             shutil.rmtree("klee-out")
 
         os.remove("./built-in.bc")
-        return True, found, top_rank, feasible
+        return True, found, top_rank, feasible, min_path, avg_paths, num_paths
 
 class GraphGeneratorProcess(multiprocessing.Process):
     def __init__(self, link_file, index):
@@ -287,13 +295,15 @@ def verify_single_path(json, path):
 TIMEOUT = 10*60
 start_times = [None for _ in range(total_cpu)]
 processes = [None for _ in range(total_cpu)]
+stats = {"min_path": [], "avg_paths": [], "num_paths": []}
 
 def main():
+    global stats
     # os.chdir("temp")
     for i in range(total_cpu):
         execute_shell(f"rm -rf {i}")
-    # for i in range(total_cpu):
-    #     execute_shell(f"mkdir -p {i}")
+    for i in range(total_cpu):
+        execute_shell(f"mkdir -p {i}")
 
 
     gnn = GNN([32, 16 , 32])
@@ -343,13 +353,6 @@ def main():
             skipped += 1
             continue 
 
-        bc_list = link_file.split(":")
-        bc_set = set(bc_list)
-
-        if len(bc_list) != len(bc_set):
-            print(f"List len: {len(bc_list)}, Set Len: {len(bc_set)}")
-
-        continue
         # if (len(x) > 1900):
         #     print(len(x))
         #     link_files(link_file)
@@ -392,6 +395,10 @@ def main():
             processes[idx].join()
             processes[idx].close()
             success, path_found, rank, feasible = processes[idx].success.value, processes[idx].path_found.value, processes[idx].rank.value, processes[idx].p.value
+            min_path, avg_path, num_path = processes[idx].min_path.value, processes[idx].avg_paths.value, processes[idx].num_paths.value
+            stats["min_path"].append(min_path)
+            stats["avg_paths"].append(avg_path)
+            stats["num_paths"].append(num_path)
             if (success):
                 completed += 1
             else:
@@ -403,20 +410,24 @@ def main():
                 infeasible += 1
             processes[idx] = None
         # WarningVerifyProcess.run(gnn, json, g, link_file)
-        print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Total: {i}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
+        print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Total: {i}, Avg-Num-paths: {sum(stats['num_paths'])/max(len(stats['num_paths']), 1)}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
+        # print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Total: {i}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
         processes[idx] = WarningVerifyProcess(gnn, json, None, link_file, idx, json_index)
         # processes[idx] = GraphGeneratorProcess(link_file, index)
         processes[idx].start()
         os.sched_setaffinity(processes[idx].pid, affinity)
         start_times[idx] = time.perf_counter()
 
-    exit()
 
     for p in processes:
         if p:
             p.join()
             p.close()
             success, path_found, rank, feasible = p.success.value, p.path_found.value, p.rank.value, p.p.value
+            min_path, avg_path, num_path = p.min_path.value, p.avg_paths.value, p.num_paths.value
+            stats["min_path"].append(min_path)
+            stats["avg_paths"].append(avg_path)
+            stats["num_paths"].append(num_path)
             if (success):
                 completed += 1
             else:
@@ -428,8 +439,12 @@ def main():
                 infeasible += 1
 
     print(f"Elapsed time: {time.perf_counter()-t} seconds")
-    print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Total: {i}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
+    print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Total: {i}, Avg-Num-paths: {sum(stats['num_paths'])/len(stats['num_paths'])}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
     print(f"Avg rank: {sum(top_ranks)/len(top_ranks)}, 90th percentile rank: {np.percentile(top_ranks, 90)}, Infeasible: {infeasible}, Accuracy: {(completed-infeasible)*100}")
+    
+
+    with open("stats.pickle", "wb") as f:
+        pickle.dump(stats, f)
     
     read_all_json("confirm_result.json")
 

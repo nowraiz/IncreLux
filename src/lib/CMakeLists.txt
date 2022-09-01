@@ -1,3 +1,15 @@
+include_directories(fmt/include)
+include_directories(abseil-cpp)
+include_directories(labm8)
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+add_subdirectory(fmt)
+add_subdirectory(abseil-cpp)
+add_subdirectory(labm8)
+add_subdirectory(programl)
+
+find_package(Protobuf REQUIRED)
+
 set (IncreLuxSourceCodes
 	UBIAnalysis.h
 	UBIAnalysis.cpp
@@ -42,8 +54,17 @@ set (EXECUTABLE_OUTPUT_PATH ${INCRELUX_BINARY_DIR})
 link_directories (${INCRELUX_BINARY_DIR}/lib)
 #project (ubitect C CXX)
 add_executable(increlux ${IncreLuxSourceCodes})
+add_dependencies(increlux GRAPHBUILDER LLVMINTERNAL PROTO)
+# include_directories("{CMAKE_CURRENT_SOURCE_DIR}/programl/labm8/cpp/abseil-cpp")
 target_link_libraries(increlux 
   ${llvm_libs}
+  LLVMINTERNAL
+  ${Protobuf_LIBRARIES}
+  absl::flat_hash_map
+  GRAPHBUILDER
+  Labm8Objects
+  LLVMHELP
+  PROTO
   LLVMAsmParser 
   LLVMSupport 
   LLVMCore 
@@ -52,3 +73,4 @@ target_link_libraries(increlux
   LLVMTransformUtils
   IncreLuxStatic
   )
+

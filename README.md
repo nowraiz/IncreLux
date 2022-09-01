@@ -108,3 +108,25 @@ Then we have a warning generated in "/home/IncreLux/example/lll-v4.15-rc1/ubi-ia
 ```
 
 And there's one verified bug report in "/home/IncreLux/example/KLEE-result/confirm\_result.json" for inspection.
+
+# IncreLux Modifications
+
+## KLEE
+
+Here are the two things changed in KLEE within IncreLux.
+
+1. Ability to dump path feasibility data during verification of the warning. This is acheived by using the `dump-paths` flag
+while running KLEE along with `train-file-name` for the file name to dump the paths in. 
+
+2. Ability to execute a single path with KLEE. This removes all the extra states created when exploring the path naturally. And
+only following the path by executing one state that follows the path. The relevant option is `single-path` in the KLEE binary. And the
+path is given in a file as a list of canonical names of instructions using the `single-path-file` flag. 
+
+The script `path-neuro-verify` shows example usage of how to use the included KLEE to verify paths. 
+
+## IncreLux
+
+There were some slight modifications within the IncreLux itself to allow for call-depth limiting while generating warnings. The appropriate code is added in `src/lib/QualifierCheck.cpp` by changing the `FuncAnalysis::findRelatedBC` function. 
+
+PrograML code is also added as a source tree within IncreLux and can be used to dump the ProgramGraph while generating warnings (is not implemented yet). The only thing we need to do is call the relevant APIs from PrograML.
+

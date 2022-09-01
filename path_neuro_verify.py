@@ -1,6 +1,7 @@
 #!/usr/bin/python
 import os.path
 import os
+import pickle
 import sys
 import subprocess
 import time
@@ -9,6 +10,7 @@ import signal
 import psutil
 from regex import P
 import torch.multiprocessing as multiprocessing
+import collections
 from functools import lru_cache
 sys.path.insert(0, '/extra/ali/agents/')
 from neurouse.models.gat.network import GNN 
@@ -51,6 +53,8 @@ klee_right_result_file_name = "tested.json"
 # if you need change the path in link file
 linux_kernel_path_in_json = "/data2/yizhuo/inc-experiment/experiment"
 linux_kernel_path_in_this_pc = "/extra/ali/kernel_ir"
+# linux_kernel_path_in_json = "/extra/ali/kernel_ir/lll-v4.14_original"
+# linux_kernel_path_in_this_pc = "/extra/ali/kernel_ir/lll-v4.14"
 
 # linux_kernel_path_in_json = "/data2/yizhuo/inc-experiment/experiment/lll-v4.14"
 # linux_kernel_path_in_this_pc = "/extra/ali/kernel_ir/lll-v4.14_original"
@@ -65,7 +69,7 @@ infeasible_warnings = 0
 affinity = list(range(24)) + list(range(48, 72))
 # affinity = [1 if 0 <= i < 24 or 48 <= i < 72 else 0 for i in range(multiprocessing.cpu_count())]
 
-K = 10
+K = 20
 
 def kill_proc_tree(pid, sig=signal.SIGKILL, include_parent=True,
                    timeout=None, on_terminate=None):
@@ -99,11 +103,14 @@ class WarningVerifyProcess(multiprocessing.Process):
         self.json_idx = json_idx
         self.success = multiprocessing.Value('i', False) 
         self.path_found = multiprocessing.Value('i', False)
+        self.accurate = multiprocessing.Value('i', 0)
+        self.total_paths = multiprocessing.Value('i', 0)
+        self.rank = multiprocessing.Value('i', 0)
 
     # @classmethod
     def run(self):
         # global found
-        self.success.value, self.path_found.value = verify_warning(self.gnn, self.json, self.graph, self.link_file, self.index, self.json_idx)
+        self.success.value, self.path_found.value, self.accurate.value, self.total_paths.value, self.rank.value = verify_warning(self.gnn, self.json, self.graph, self.link_file, self.index, self.json_idx)
 
 def verify_warning(gnn=None, json=None, graph=None, link_file=None, index=None, json_idx=None):
         if index is not None:
@@ -115,18 +122,18 @@ def verify_warning(gnn=None, json=None, graph=None, link_file=None, index=None, 
             print(f"--BEGIN-OUTPUT--")
             print(stdout.decode("utf-8"), stderr.decode("utf-8"))
             print("--END-OUTPUT--") 
-            return False, False
-        graph = DataGraphGenerator.prepare_or_load_data_graph_from_bc("./built-in.bc", bc_list)
-        if (graph is None):
-            print("Unable to generate graph")
-            return False, False
+            return False, False, 0, 0, 0
+        # graph = DataGraphGenerator.prepare_or_load_data_graph_from_bc("./built-in.bc", bc_list)
+        # if (graph is None):
+            # print("Unable to generate graph")
+            return False, False, 0, 0, 0
         error, stdout, stderr = enumerate_paths(json)
         if (error != 0): 
             print(f"{json_idx}: Error in enumerating paths. Output and errors below...")
             print("--BEGIN-OUTPUT--")
             print(stdout.decode("utf-8"), stderr.decode("utf-8"))
             print("--END-OUTPUT--")
-            return False, False
+            return False, False, 0, 0, 0
         # pprint.pprint(json)
         # with open("paths.txt") as f:
         #     paths = f.read()
@@ -134,26 +141,38 @@ def verify_warning(gnn=None, json=None, graph=None, link_file=None, index=None, 
         # print(paths)
         paths = eval(stdout)
         if not paths:
-            return False, False
+            return False, False, 0, 0, 0
         # link_files.append(link_file)
-        items = rank_paths(gnn, paths, graph)
-        
+        # items = rank_paths(gnn, paths, graph)
+        total_paths = 0
+        accurate = 0
         found = False
-        for i in range(min(len(items), K)):
-            item = items[i]
-            path, rank = item
+        top_rank = 0
+        # for i in range(min(len(items), K)):
+        for i in range(len(paths)):
+            # item = items[i]
+            # path, rank = item
+            path = paths[i]
             # print(rank)
             r, _, _ = verify_single_path(json, path)
             if (r == 69):
+                # if rank >= 0.5:
+                    # accurate += 1
                 found = True
+                # if top_rank == 0:
+                    # top_rank = i + 1
                 # found += 1
                 # print(f"Found: {found}")
                 # break
+            # else:
+                # if rank < 0.5:
+                    # accurate += 1
+            total_paths += 1
                 
             shutil.rmtree("klee-out")
 
         os.remove("./built-in.bc")
-        return True, found
+        return True, found, accurate, total_paths, top_rank
 
 class GraphGeneratorProcess(multiprocessing.Process):
     def __init__(self, link_file, index):
@@ -187,9 +206,10 @@ def link_files(link_file):
     link_file = link_file.replace(linux_kernel_path_in_json, linux_kernel_path_in_this_pc)
     bc_list = link_file.replace(":\n", "")
     bc_list = bc_list.split(":")
-    link_cmd = home_path + "/llvm/build/bin/llvm-link -o " + "./built-in.bc"
+    link_cmd = home_path + "/llvm/build/bin/llvm-link --only-needed -o " + "./built-in.bc"
     for bc in bc_list:
         link_cmd = link_cmd + " " + bc
+    # print(link_cmd)
     
     return execute_shell(link_cmd), bc_list 
 
@@ -256,117 +276,143 @@ def verify_single_path(json, path):
 TIMEOUT = 10*60
 start_times = [None for _ in range(total_cpu)]
 processes = [None for _ in range(total_cpu)]
+top_k = collections.defaultdict(int)
+accurate = 0
+total_paths = 0
+num_paths = []
 
 def main():
-    # # os.chdir("temp")
-    # for i in range(total_cpu):
-    #     execute_shell(f"rm -rf {i}")
-    # for i in range(total_cpu):
-    #     execute_shell(f"mkdir -p {i}")
+    global accurate, total_paths, num_paths
+    # os.chdir("temp")
+    for i in range(total_cpu):
+        execute_shell(f"rm -rf {i}")
+    for i in range(total_cpu):
+        execute_shell(f"mkdir -p {i}")
 
 
-    # gnn = GNN([32, 16 , 32])
-    # sd = torch.load("/extra/ali/agents/saved_models/state.dict")
-    # gnn.load_state_dict(sd)
-    # gnn.eval()
+    gnn = GNN([32, 16 , 32])
+    sd = torch.load("/extra/ali/agents/saved_models/state.dict")
+    gnn.load_state_dict(sd)
+    gnn.eval()
 
-    # filename = sys.argv[1]
-    # file = open(filename)
+    filename = sys.argv[1]
+    file = open(filename)
 
-    # json_index = 0
-    # line = file.readline()
-    # SKIP_WARNINGS = 0
-    # idx = 0
-    # t = time.perf_counter()
-    # i = 0 
+    json_index = 0
+    line = file.readline()
+    SKIP_WARNINGS = 0
+    idx = 0
+    t = time.perf_counter()
+    i = 0 
   
-    # skipped = 0
-    # completed = 0
-    # paths_found = 0
-    # failed = 0
-    # timed_out_warnings = 0
-    # while line:
-    #     i += 1
-    #     json_index = json_index + 1
-    #     link_file = line
-    #     json = file.readline()
-    #     json = json.replace("\n", "")
-    #     line = file.readline()
-    #     x = link_file.strip().split(":")
-    #     if (len(x) > 1000):
-    #         # do something
-    #         skipped += 1
-    #         continue
-    #     # if (len(x) > 1900):
-    #     #     print(len(x))
-    #     #     link_files(link_file)
-    #     #     print("Linked", flush=True)
-    #     #     enumerate_paths(json)
-    #         # verify_baseline(json)
-    #     # parsed = JSON.loads(json)
+    skipped = 0
+    completed = 0
+    paths_found = 0
+    failed = 0
+    timed_out_warnings = 0
+    while line:
+        i += 1
+        json_index = json_index + 1
+        link_file = line
+        json = file.readline()
+        json = json.replace("\n", "")
+        line = file.readline()
+        x = link_file.strip().split(":")
+        # if (len(x) > 500):
+        #     # do something
+        #     skipped += 1
+        #     continue
+        # if (len(x) > 1900):
+        #     print(len(x))
+        #     link_files(link_file)
+        #     print("Linked", flush=True)
+        #     enumerate_paths(json)
+            # verify_baseline(json)
+        # parsed = JSON.loads(json)
         
-    #     # if (skipped < SKIP_WARNINGS):
-    #     #     skipped += 1
-    #     #     continue
-    #     # # g = create_data_graph(link_file)
-    #     # if link_file in done:
-    #     #     continue
+        # if (skipped < SKIP_WARNINGS):
+        #     skipped += 1
+        #     continue
+        # # g = create_data_graph(link_file)
+        # if link_file in done:
+        #     continue
         
-    #     timed_out = False
-    #     while processes[idx] and processes[idx].is_alive():
-    #         if start_times[idx] and time.perf_counter() - start_times[idx] > TIMEOUT:
-    #             timed_out = True
-    #             break 
-    #         idx = (idx + 1) % total_cpu
+        timed_out = False
+        while processes[idx] and processes[idx].is_alive():
+            if start_times[idx] and time.perf_counter() - start_times[idx] > TIMEOUT:
+                timed_out = True
+                break 
+            idx = (idx + 1) % total_cpu
         
-    #     # output, stdout, stderr = link_files(link_file)
-    #     # if (output != 0):
-    #         # print(link_file)
-    #         # print(stdout)
-    #         # print(stderr)
+        # output, stdout, stderr = link_files(link_file)
+        # if (output != 0):
+            # print(link_file)
+            # print(stdout)
+            # print(stderr)
 
-    #     if timed_out:
-    #         if processes[idx].is_alive():
-    #             kill_proc_tree(processes[idx].pid, include_parent=False)
-    #             processes[idx].kill()
-    #         while processes[idx].is_alive():
-    #             processes[idx].kill()
-    #         processes[idx].close()
-    #         timed_out_warnings += 1
-    #     # p.apply_async(WarningVerifyProcess.run, (gnn, json, link_file, idx))
-    #     # # processes[idx].terminate()
-    #     if processes[idx] and not timed_out:
-    #         processes[idx].join()
-    #         processes[idx].close()
-    #         success, path_found = processes[idx].success.value, processes[idx].path_found.value
-    #         if (success):
-    #             completed += 1
-    #         else:
-    #             failed += 1
-    #         if path_found:
-    #             paths_found += 1
-    #     # WarningVerifyProcess.run(gnn, json, g, link_file)
-    #     print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Total: {i}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
-    #     processes[idx] = WarningVerifyProcess(gnn, json, None, link_file, idx, json_index)
-    #     # processes[idx] = GraphGeneratorProcess(link_file, index)
-    #     processes[idx].start()
-    #     os.sched_setaffinity(processes[idx].pid, affinity)
-    #     start_times[idx] = time.perf_counter()
+        if timed_out:
+            if processes[idx].is_alive():
+                kill_proc_tree(processes[idx].pid, include_parent=False)
+                processes[idx].kill()
+            while processes[idx].is_alive():
+                processes[idx].kill()
+            processes[idx].close()
+            timed_out_warnings += 1
+        # p.apply_async(WarningVerifyProcess.run, (gnn, json, link_file, idx))
+        # # processes[idx].terminate()
+        if processes[idx] and not timed_out:
+            p = processes[idx]
+            p.join()
+            p.close()
+            success, path_found, top_rank, accurate_, total_paths_ = p.success.value, p.path_found.value, p.rank.value, p.accurate.value, p.total_paths.value
+            if (success):
+                completed += 1
+                if path_found:
+                    paths_found += 1
+                accurate += accurate_
+                total_paths += total_paths_
+                num_paths.append(total_paths_)
+                top_k[top_rank] += 1
+            else:
+                failed += 1
+        # WarningVerifyProcess.run(gnn, json, g, link_file)
+        print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Accuracy: {0}, Avg-paths: {(sum(num_paths)/len(num_paths)) if num_paths else 0}, Total: {i}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
+        processes[idx] = WarningVerifyProcess(gnn, json, None, link_file, idx, json_index)
+        # processes[idx] = GraphGeneratorProcess(link_file, index)
+        processes[idx].start()
+        os.sched_setaffinity(processes[idx].pid, affinity)
+        start_times[idx] = time.perf_counter()
 
 
-    # for p in processes:
-    #     if p:
-    #         p.join()
-    #         p.close()
+    for p in processes:
+        if p:
+            p.join()
+            p.close()
+            success, path_found, top_rank, accurate_, total_paths_ = p.success.value, p.path_found.value, p.rank.value, p.accurate.value, p.total_paths.value
+            if (success):
+                completed += 1
+                if path_found:
+                    paths_found += 1
+                accurate += accurate_
+                total_paths += total_paths_
+                num_paths.append(total_paths)
+                top_k[top_rank] += 1
+            else:
+                failed += 1
+    
+    with open("paths.pickle", "wb") as f:
+        pickle.dump(num_paths, f)
 
-    # print(f"Elapsed time: {time.perf_counter()-t} seconds")
-    # print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Total: {i}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
-    # read_all_json("confirm_result.json")
 
-    # for i in range(total_cpu):
-    #     shutil.rmtree(str(i))
-    # for i in range(total_cpu):
-        # execute_shell(f"rm -rf {i}")
+
+    print(f"Elapsed time: {time.perf_counter()-t} seconds")
+    print(f"Completed: {completed} Processed: {i-skipped}, Found_paths: {paths_found}, Accuracy: {0}, Avg-paths: {(sum(num_paths)/len(num_paths)) if num_paths else 0}, Total: {i}, Failed: {failed} Timed-out: {timed_out_warnings}, Skipped: {skipped}")
+    read_all_json("confirm_result.json")
+
+    for i in range(total_cpu):
+        shutil.rmtree(str(i))
+    for i in range(total_cpu):
+        execute_shell(f"rm -rf {i}")
 
 
 

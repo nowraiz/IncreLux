@@ -761,9 +761,9 @@ int main(int argc, char **argv)
 	if (UniAnalysis)
 	{
 		OP << "Total " << InputFilenames.size() -1 << " file(s)\n";
-		GlobalCtx.absPath = argv[argc - 1];
-		GlobalCtx.outFolder = GlobalCtx.absPath+"/ubi-ia-out/";
-		GlobalCtx.jsonFile = GlobalCtx.outFolder+"/ubiWarn.json";
+		// GlobalCtx.absPath = argv[argc - 1];
+		// GlobalCtx.outFolder = GlobalCtx.absPath+"/ubi-ia-out/";
+		// GlobalCtx.jsonFile = GlobalCtx.outFolder+"/ubiWarn.json";
 		for (unsigned i = 0; i < InputFilenames.size(); ++i)
 		{
 			LLVMContext *LLVMCtx = new LLVMContext();
